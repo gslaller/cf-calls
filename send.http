@@ -1,0 +1,7 @@
+POST http://localhost:8088/api/one/message
+Content-Type: application/json
+
+{
+  "content": "Das ist einfach noch ein test",
+  "user": "gslaller"
+}
