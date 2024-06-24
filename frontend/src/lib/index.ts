@@ -1,11 +1,79 @@
-// place files you want to import through the `$lib` alias in this folder.
+type ObjectToBePassed = {
+    sessionId: string;
+    trackId: string;
+}[];
 
-// should reflect
+let pcSend: RTCPeerConnection;
+let pcReceive: RTCPeerConnection;
 
-let pc: RTCPeerConnection;
+type NewSessionResponse = {
+    sessionId: string;
+    sessionDescription: RTCSessionDescriptionInit;
+};
 
-export async function ReflectStream(localStream: MediaStream): Promise<MediaStream> {
-    pc = new RTCPeerConnection({
+async function newSession(offfer: RTCSessionDescriptionInit): Promise<NewSessionResponse> {
+    let newSessionResponse = await fetch("http://localhost:8088/newSession", {
+        method: "POST",
+        body: JSON.stringify({
+            sessionDescription: offfer
+        })
+    });
+
+    return newSessionResponse.json();
+}
+
+type NewTrackPayload = {
+    sessionDescription: RTCSessionDescriptionInit;
+    tracks: {
+        location: "local";
+        mid: string;
+        trackName: string;
+    }[];
+} | {
+    tracks: {
+        location: "remote";
+        sessionId: string;
+        trackName: string;
+    }[];
+};
+
+type NewTrackResponse = {
+    requiresImmediateRenegotiation: boolean;
+    sessionDescription: RTCSessionDescriptionInit;
+    tracks: Array<{
+        mid: string;
+        trackName: string;
+    }>
+};
+
+async function newTrack(sessionId: string, payload: NewTrackPayload): Promise<NewTrackResponse> {
+    // add query params to the url
+    let url = new URL("http://localhost:8088/newTrack");
+    url.searchParams.append("sessionId", sessionId);
+
+
+    let newLocalTracksResult = await fetch(url, {
+        method: "POST",
+        body: JSON.stringify(payload)
+    });
+
+    return newLocalTracksResult.json();
+}
+
+async function renegotiate(sessionId: string, payload: RTCSessionDescriptionInit): Promise<void> {
+    let url = new URL("http://localhost:8088/renegotiate");
+    url.searchParams.append("sessionId", sessionId);
+    await fetch(url, {
+        method: "POST",
+        body: JSON.stringify({
+            sessionDescription: payload
+        })
+    });
+}
+
+export async function JustSend(localStream: MediaStream): Promise<ObjectToBePassed> {
+
+    pcSend = new RTCPeerConnection({
         iceServers: [
             {
                 urls: "stun:stun.cloudflare.com:3478",
@@ -15,30 +83,22 @@ export async function ReflectStream(localStream: MediaStream): Promise<MediaStre
     });
 
     let sendOnlyTransceivers = localStream.getTracks().map(track => {
-        return pc.addTransceiver(track, {
+        return pcSend.addTransceiver(track, {
             direction: "sendonly"
         });
     });
 
-    let offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    let newSessionResponse = await fetch("http://localhost:8088/newSession", {
-        method: "POST",
-        body: JSON.stringify({
-            sessionDescription: offer
-        })
-    });
+    let offer = await pcSend.createOffer();
+    await pcSend.setLocalDescription(offer);
 
-    let newSession = await newSessionResponse.json() as {
-        sessionId: string;
-        sessionDescription: RTCSessionDescriptionInit;
-    }
+    let newSessionResponse = await newSession(offer);
+    const sessionId = newSessionResponse.sessionId;
 
-    await pc.setRemoteDescription(newSession.sessionDescription);
+    await pcSend.setRemoteDescription(newSessionResponse.sessionDescription);
 
     await new Promise<void>((resolve, reject) => {
-        pc.addEventListener("iceconnectionstatechange", (ev) => {
-            if (pc.iceConnectionState === "connected") {
+        pcSend.addEventListener("iceconnectionstatechange", (ev) => {
+            if (pcSend.iceConnectionState === "connected") {
                 resolve();
             }
         });
@@ -47,81 +107,96 @@ export async function ReflectStream(localStream: MediaStream): Promise<MediaStre
 
     const trackObjects = sendOnlyTransceivers.map(transceiver => {
         return {
-            location: "local",
-            mid: transceiver.mid,
-            trackName: transceiver.sender.track?.id,
+            location: "local" as const,
+            mid: transceiver.mid!,
+            trackName: transceiver.sender.track!.id,
         }
     });
 
-    let offer2 = await pc.createOffer();
-    await pc.setLocalDescription(offer2);
+    let offer2 = await pcSend.createOffer();
+    await pcSend.setLocalDescription(offer2);
 
-    const newLocalTracksResult = await fetch("http://localhost:8088/newTrack", {
-        method: "POST",
-        body: JSON.stringify({
-            sessionDescription: offer2,
-            sessionId: newSession.sessionId,
-            tracks: trackObjects
-        })
+
+    let newTrackPayload = await newTrack(sessionId, {
+        sessionDescription: offer2,
+        tracks: trackObjects
     });
 
-    type NewLocalTracksResponse = {
-        requiresImmediateRenegotiation: boolean;
-        sessionDescription: RTCSessionDescriptionInit;
-        tracks: Array<{
-            mid: string;
-            trackName: string;
-        }>
-    }
-
-    let data = await newLocalTracksResult.json() as NewLocalTracksResponse;
-    await pc.setRemoteDescription(data.sessionDescription);
-
-    let remoteTrackObjects = trackObjects.map(trackObject => {
+    return newTrackPayload.tracks.map(track => {
         return {
-            location: "remote",
-            sessionId: newSession.sessionId,
-            trackName: trackObject.trackName,
+            sessionId: sessionId,
+            trackId: track.trackName
+        }
+    });
+}
+
+export async function JustReceive(payload: ObjectToBePassed): Promise<MediaStream> {
+    pcReceive = new RTCPeerConnection({
+        iceServers: [
+            {
+                urls: "stun:stun.cloudflare.com:3478",
+            }
+        ],
+        bundlePolicy: "max-bundle",
+    });
+
+    let audioTransceiver = pcReceive.addTransceiver("audio", {
+        direction: "recvonly"
+    });
+
+    let receiveOnlyTransceivers = pcReceive.addTransceiver("video", {
+        direction: "recvonly"
+    });
+
+    let offer = await pcReceive.createOffer();
+    await pcReceive.setLocalDescription(offer);
+
+    let newSessionResponse = await newSession(offer);
+    let sessionId = newSessionResponse.sessionId;
+
+    await pcReceive.setRemoteDescription(newSessionResponse.sessionDescription);
+
+    await new Promise<void>((resolve, reject) => {
+        pcReceive.addEventListener("iceconnectionstatechange", (ev) => {
+            if (pcReceive.iceConnectionState === "connected") {
+                resolve();
+            }
+        });
+        setTimeout(reject, 5000, "timeout");
+    });
+
+    let remoteTracksObjects = payload.map(track => {
+        return {
+            location: "remote" as const,
+            sessionId: track.sessionId,
+            trackName: track.trackId
         }
     });
 
-    const remoteTracksPromise = new Promise<MediaStreamTrack[]>((resolve, reject) => {
+    const trackPromise = new Promise<MediaStreamTrack[]>((resolve, reject) => {
         let tracks: MediaStreamTrack[] = [];
-        pc.ontrack = (ev) => {
+        pcReceive.addEventListener("track", (ev) => {
             tracks.push(ev.track);
-            if (tracks.length === trackObjects.length) {
+            if (tracks.length === remoteTracksObjects.length) {
                 resolve(tracks);
             }
-        };
-    });
-
-    const newRemoteTracksResult = await fetch("http://localhost:8088/newTrack", {
-        method: "POST",
-        body: JSON.stringify({
-            sessionId: newSession.sessionId,
-            tracks: remoteTrackObjects
-        })
-    });
-
-    let remoteTracks = await newRemoteTracksResult.json() as NewLocalTracksResponse;
-
-    if (remoteTracks.requiresImmediateRenegotiation && remoteTracks.sessionDescription.type === "offer") {
-        await pc.setRemoteDescription(remoteTracks.sessionDescription);
-        let answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        let resp = await fetch("http://localhost:8088/renegotiate", {
-            method: "POST",
-            body: JSON.stringify({
-                sessionId: newSession.sessionId,
-                sessionDescription: answer
-            })
         });
+        setTimeout(reject, 5000, "timeout, not all tracks received");
+    });
 
-        console.log(await resp.json());
+    let answerTracks = await newTrack(sessionId, {
+        tracks: remoteTracksObjects
+    });
+
+    if (answerTracks.requiresImmediateRenegotiation && answerTracks.sessionDescription.type === "offer") {
+        await pcReceive.setRemoteDescription(answerTracks.sessionDescription);
+        let answer = await pcReceive.createAnswer();
+        await pcReceive.setLocalDescription(answer);
+        await renegotiate(sessionId, answer);
     }
 
-    const remoteT = await remoteTracksPromise;
-    const remoteStream = new MediaStream(remoteT);
 
-    return remoteStream;
+    const tracks = await trackPromise;
+    return new MediaStream(tracks);
+
 }
