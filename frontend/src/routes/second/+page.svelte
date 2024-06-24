@@ -1,24 +1,21 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { ReflectStream } from "$lib";
+  import { JustReceive, JustSend } from "$lib/second";
 
   let localVideoEle: HTMLVideoElement;
   let remoteVideoEle: HTMLVideoElement;
   let isStreaming = false;
 
   async function starter() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
-      localVideoEle.srcObject = stream;
-      let remoteStream = await ReflectStream(stream);
-      remoteVideoEle.srcObject = remoteStream;
-      isStreaming = true;
-    } catch (error) {
-      console.error("Error accessing media devices:", error);
-    }
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true,
+    });
+    localVideoEle.srcObject = stream;
+    let objs = await JustSend(stream);
+    let remoteStream = await JustReceive(objs);
+    remoteVideoEle.srcObject = remoteStream;
+    isStreaming = true;
   }
 
   onMount(() => {
@@ -39,12 +36,11 @@
 </script>
 
 <main>
-  <h1>Other implementation</h1>
-  <ul>
-    <ul>
-      <a href="/second">Second implementation</a>
-    </ul>
-  </ul>
+  <h1>The second implementation</h1>
+  <p>
+    no breaking changes in the backend, but now we have two rtc connection on
+    for send and another one for receiving
+  </p>
   <button type="button" on:click={starter} disabled={isStreaming}>
     {isStreaming ? "Streaming..." : "Start Stream"}
   </button>
