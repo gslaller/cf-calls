@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 
@@ -42,6 +45,37 @@ func newTrack(c *gin.Context) {
 	sessionId := c.Query("sessionId")
 	postPath := fmt.Sprintf("%s/sessions/%s/tracks/new", basePath, sessionId)
 
+	// Read the raw body
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		log.Printf("Failed to read body: %s", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+		return
+	}
+
+	// Restore the body for later use
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+	// Unmarshal the body to log track information
+	var body struct {
+		Tracks []struct {
+			Location  string `json:"location"`
+			Mid       string `json:"mid"`
+			SessionId string `json:"sessionId"`
+			TrackName string `json:"trackName"`
+		} `json:"tracks"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+		log.Printf("Failed to unmarshal JSON: %s", err.Error())
+	} else {
+		log.Printf("Session %s received new track(s) %d:", sessionId, len(body.Tracks))
+		for _, track := range body.Tracks {
+			log.Printf("New track(loc: %s): %s (%s) in session %s", track.Location, track.TrackName, track.Mid, track.SessionId)
+		}
+	}
+
+	// Forward the request with the original body
 	forwardRequest(c, "POST", postPath)
 }
 

@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { JustReceive, JustSend } from "$lib";
+  import { WebRTCManager } from "$lib";
 
   let localVideoEle: HTMLVideoElement;
   let remoteVideoEle: HTMLVideoElement;
   let isStreaming = false;
+
+  const manager = new WebRTCManager();
 
   async function starter() {
     try {
@@ -13,14 +15,20 @@
         audio: true,
       });
       localVideoEle.srcObject = stream;
-      let objs = await JustSend(stream);
-      let remoteStream = await JustReceive(objs);
+      let objs = await manager.send(stream);
+      let remoteStream = await manager.receive(objs);
       remoteVideoEle.srcObject = remoteStream;
       isStreaming = true;
     } catch (error) {
       console.error("Error accessing media devices:", error);
     }
   }
+
+  async function fullClose() {}
+
+  async function sendClose() {}
+
+  async function receiveClose() {}
 
   onMount(() => {
     return () => {
@@ -43,6 +51,17 @@
   <button type="button" on:click={starter} disabled={isStreaming}>
     {isStreaming ? "Streaming..." : "Start Stream"}
   </button>
+  <button type="button" on:click={fullClose} disabled={!isStreaming}>
+    Stop Stream
+  </button>
+  <div class="row">
+    <button type="button" on:click={sendClose} disabled={!isStreaming}>
+      Stop Sending
+    </button>
+    <button type="button" on:click={receiveClose} disabled={!isStreaming}>
+      Stop Receiving
+    </button>
+  </div>
 
   <div class="video-container">
     <div class="video-wrapper">
@@ -120,5 +139,10 @@
     width: 100%;
     height: auto;
     display: block;
+  }
+
+  .row {
+    display: flex;
+    gap: 20px;
   }
 </style>
