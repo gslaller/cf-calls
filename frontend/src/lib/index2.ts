@@ -17,16 +17,21 @@ type ObjectToBePassed = {
  * - GET/SSE ${basepath}/events
  */
 export class WebRTCManager {
-    private pcSend: RTCPeerConnection | null = null;
-    private pcReceive: RTCPeerConnection | null = null;
+    private pc: RTCPeerConnection | null = null;
+    private sessionId: string | null = null;
     private readonly iceServers = [{ urls: "stun:stun.cloudflare.com:3478" }];
     private readonly httpServer = "http://localhost:8088";
 
-    private async createPeerConnection(): Promise<RTCPeerConnection> {
-        return new RTCPeerConnection({
+    private async getRTC(): Promise<RTCPeerConnection> {
+        if (this.pc !== null) {
+            return this.pc;
+        }
+        this.pc = new RTCPeerConnection({
             iceServers: this.iceServers,
             bundlePolicy: "max-bundle",
         });
+
+        return this.pc;
     }
 
     private async waitForIceConnection(pc: RTCPeerConnection): Promise<void> {
@@ -61,6 +66,7 @@ export class WebRTCManager {
                 trackName: string;
             }[];
         } | {
+            sessionDescription?: RTCSessionDescriptionInit;
             tracks: {
                 location: "remote";
                 sessionId: string;
@@ -95,66 +101,35 @@ export class WebRTCManager {
         });
     }
 
-    private async establishConnection(): Promise<void> {
-        return;
-    }
 
-    public async send(localStream: MediaStream): Promise<ObjectToBePassed> {
-        this.pcSend = await this.createPeerConnection();
-
-        const sendOnlyTransceivers = localStream.getTracks().map(track =>
-            this.pcSend!.addTransceiver(track, { direction: "sendonly" })
-        );
-
-        const offer = await this.pcSend.createOffer();
-        await this.pcSend.setLocalDescription(offer);
-
-        const newSessionResponse = await this.newSession(offer);
-        const { sessionId, sessionDescription } = newSessionResponse;
-
-        await this.pcSend.setRemoteDescription(sessionDescription);
-        await this.waitForIceConnection(this.pcSend);
-
-        const trackObjects = sendOnlyTransceivers.map(transceiver => ({
-            location: "local" as const,
-            mid: transceiver.mid!,
-            trackName: transceiver.sender.track!.id,
-        }));
-
-        const offer2 = await this.pcSend.createOffer();
-        await this.pcSend.setLocalDescription(offer2);
-
-        const newTrackPayload = await this.newTrack(sessionId, {
-            sessionDescription: offer2,
-            tracks: trackObjects,
-        });
-
-        console.log({ newTrackPayload, time: "Somewhere " });
-
-        await this.pcSend.setRemoteDescription(newTrackPayload.sessionDescription);
-
-        return newTrackPayload.tracks.map(track => ({
-            sessionId,
-            trackId: track.trackName,
-        }));
-    }
 
 
 
     public async receive(payload: ObjectToBePassed): Promise<MediaStream> {
-        this.pcReceive = await this.createPeerConnection();
+        let pc = await this.getRTC();
 
-        this.pcReceive.addTransceiver("audio", { direction: "recvonly" });
-        this.pcReceive.addTransceiver("video", { direction: "recvonly" });
+        pc.addTransceiver("audio", { direction: "recvonly" });
+        pc.addTransceiver("video", { direction: "recvonly" });
 
-        const offer = await this.pcReceive.createOffer();
-        await this.pcReceive.setLocalDescription(offer);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
 
-        const newSessionResponse = await this.newSession(offer);
-        const { sessionId, sessionDescription } = newSessionResponse;
+        let firstTime = false;
 
-        await this.pcReceive.setRemoteDescription(sessionDescription);
-        await this.waitForIceConnection(this.pcReceive);
+        if (this.sessionId === null) {
+            // we don't need to create a new session if there is already one
+            const newSessionResponse = await this.newSession(offer);
+            const { sessionId, sessionDescription } = newSessionResponse;
+            this.sessionId = sessionId;
+
+            await pc.setRemoteDescription(sessionDescription);
+            await this.waitForIceConnection(pc);
+            firstTime = true;
+
+        } else {
+            console.log("Found sessionId", this.sessionId);
+
+        }
 
         const remoteTracksObjects = payload.map(track => ({
             location: "remote" as const,
@@ -163,31 +138,46 @@ export class WebRTCManager {
         }));
 
         const trackPromise = new Promise<MediaStreamTrack[]>((resolve, reject) => {
+
             const tracks: MediaStreamTrack[] = [];
-            this.pcReceive!.addEventListener("track", (ev) => {
+            let localCounter = 0;
+            this.pc!.addEventListener("track", (ev) => {
+                localCounter++;
+
                 tracks.push(ev.track);
+                console.log(`Received track ${localCounter} of ${remoteTracksObjects.length}`)
                 console.log(ev);
                 if (tracks.length === remoteTracksObjects.length) {
                     resolve(tracks);
                 }
             });
-            setTimeout(() => reject("Timeout, not all tracks received"), 5000);
+            setTimeout(() => reject(`only received ${tracks.length} of ${remoteTracksObjects.length} tracks`), 5000);
         });
 
-        // console.log({ remoteTracksObjects });
-        const answerTracks = await this.newTrack(sessionId, { tracks: remoteTracksObjects });
-        // console.log({ answerTracks });
+
+
+        let answerTracks;
+        if (firstTime) {
+            console.log("Adding new tracks for the first time");
+            answerTracks = await this.newTrack(this.sessionId, { tracks: remoteTracksObjects });
+            console.log({ answerTracks, time: "First time" });
+        } else {
+            console.log("Adding new tracks");
+            answerTracks = await this.newTrack(this.sessionId, { sessionDescription: offer, tracks: remoteTracksObjects });
+            console.log({ answerTracks, time: "Second time" });
+            await pc.setRemoteDescription(answerTracks.sessionDescription);
+        }
 
         if (answerTracks.requiresImmediateRenegotiation && answerTracks.sessionDescription.type === "offer") {
-            await this.pcReceive.setRemoteDescription(answerTracks.sessionDescription);
-            const answer = await this.pcReceive.createAnswer();
-            await this.pcReceive.setLocalDescription(answer);
-            await this.renegotiate(sessionId, answer);
+            await pc.setRemoteDescription(answerTracks.sessionDescription);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            await this.renegotiate(this.sessionId, answer);
         }
 
 
         const tracks = await trackPromise;
-        this.pcReceive.getReceivers().forEach(receiver => {
+        pc.getReceivers().forEach(receiver => {
             console.log({ receiver });
         });
         return new MediaStream(tracks);
