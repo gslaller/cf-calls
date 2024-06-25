@@ -3,8 +3,19 @@ type ObjectToBePassed = {
     trackId: string;
 }[];
 
-// there needs only be a single RTCPeerConnection, but different transceivers and accompanying renegotiations
-// this is to be implemented 
+/**
+ * WebRTCManager
+ * 
+ * This class esbtlishes a single WebRTC connection to the CF- Calls api.
+ * The connection can send and receive multiple MediaStreamTracks.
+ * 
+ * enpoints api:
+ * - POST ${basepath}/newSession
+ * - POST ${basepath}/newTrack
+ * - POST ${basepath}/renegotiate
+ * - POST ${basepath}/close
+ * - GET/SSE ${basepath}/events
+ */
 export class WebRTCManager {
     private pcSend: RTCPeerConnection | null = null;
     private pcReceive: RTCPeerConnection | null = null;
@@ -84,6 +95,10 @@ export class WebRTCManager {
         });
     }
 
+    private async establishConnection(): Promise<void> {
+        return;
+    }
+
     public async send(localStream: MediaStream): Promise<ObjectToBePassed> {
         this.pcSend = await this.createPeerConnection();
 
@@ -114,11 +129,15 @@ export class WebRTCManager {
             tracks: trackObjects,
         });
 
+        await this.pcSend.setRemoteDescription(newTrackPayload.sessionDescription);
+
         return newTrackPayload.tracks.map(track => ({
             sessionId,
             trackId: track.trackName,
         }));
     }
+
+
 
     public async receive(payload: ObjectToBePassed): Promise<MediaStream> {
         this.pcReceive = await this.createPeerConnection();

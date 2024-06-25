@@ -1,12 +1,17 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { WebRTCManager } from "$lib";
+  import AudioVis from "$lib/comps/AudioVis.svelte";
 
   let localVideoEle: HTMLVideoElement;
   let remoteVideoEle: HTMLVideoElement;
   let isStreaming = false;
 
+  let localAudio: MediaStreamTrack | null = null;
+  let remoteAudio: MediaStreamTrack | null = null;
+
   const manager = new WebRTCManager();
+  const manager2 = new WebRTCManager();
 
   async function starter() {
     try {
@@ -15,8 +20,13 @@
         audio: true,
       });
       localVideoEle.srcObject = stream;
+      localAudio = stream.getAudioTracks()[0];
+
       let objs = await manager.send(stream);
-      let remoteStream = await manager.receive(objs);
+      let remoteStream = await manager2.receive(objs);
+
+      remoteAudio = remoteStream.getAudioTracks()[0];
+
       remoteVideoEle.srcObject = remoteStream;
       isStreaming = true;
     } catch (error) {
@@ -66,16 +76,22 @@
   <div class="video-container">
     <div class="video-wrapper">
       <h2>Local</h2>
-      <video bind:this={localVideoEle} autoplay muted playsinline>
+      <video bind:this={localVideoEle} autoplay controls muted playsinline>
         <track kind="captions" />
       </video>
+      {#if localAudio}
+        <AudioVis track={localAudio} />
+      {/if}
     </div>
 
     <div class="video-wrapper">
       <h2>Remote</h2>
-      <video bind:this={remoteVideoEle} autoplay muted playsinline>
+      <video bind:this={remoteVideoEle} autoplay controls muted playsinline>
         <track kind="captions" />
       </video>
+      {#if remoteAudio}
+        <AudioVis track={remoteAudio} />
+      {/if}
     </div>
   </div>
 </main>
