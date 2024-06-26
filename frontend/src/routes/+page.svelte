@@ -14,7 +14,7 @@
   let remoteAudio: MediaStreamTrack | null = null;
   let remoteAudio2: MediaStreamTrack | null = null;
 
-  const manager = new WebRTCManager();
+  // const manager = new WebRTCManager();
   const manager2 = new WebRTCManager2();
 
   async function starter() {
@@ -27,7 +27,7 @@
       localAudio = stream.getAudioTracks()[0];
 
       console.log("Now Sending media");
-      let objs = await manager.send(stream);
+      let objs = await manager2.send(stream);
 
       console.log("Now receiving media one");
       let remoteStream = await manager2.receive(objs);
@@ -35,7 +35,7 @@
       remoteVideoEle.srcObject = remoteStream;
 
       // sleep for 10 seconds
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      await new Promise((resolve) => setTimeout(resolve, 10000));
 
       console.log("Now receiving media two");
       let remoteStream2 = await manager2.receive(objs);

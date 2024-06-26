@@ -3,6 +3,11 @@ type ObjectToBePassed = {
     trackId: string;
 }[];
 
+interface WebRTCManagerI {
+    send(localStream: MediaStream): Promise<ObjectToBePassed>;
+    receive(payload: ObjectToBePassed): Promise<MediaStream>;
+}
+
 /**
  * WebRTCManager
  * 
@@ -16,7 +21,7 @@ type ObjectToBePassed = {
  * - POST ${basepath}/close
  * - GET/SSE ${basepath}/events
  */
-export class WebRTCManager {
+export class WebRTCManager implements WebRTCManagerI {
     private pc: RTCPeerConnection | null = null;
     private sessionId: string | null = null;
     private readonly iceServers = [{ urls: "stun:stun.cloudflare.com:3478" }];
@@ -101,9 +106,50 @@ export class WebRTCManager {
         });
     }
 
+    async send(localStream: MediaStream): Promise<ObjectToBePassed> {
+        let pc = await this.getRTC();
 
+        const sendOnlyTransceivers = localStream.getTracks().map(track => {
+            return pc.addTransceiver(track, { direction: "sendonly" });
+        });
 
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        let offer2 = offer;
 
+        if (this.sessionId === null) {
+            const { sessionId, sessionDescription } = await this.newSession(offer);
+            this.sessionId = sessionId;
+            await pc.setRemoteDescription(sessionDescription);
+            await this.waitForIceConnection(pc);
+
+            offer2 = await pc.createOffer();
+            await pc.setLocalDescription(offer2);
+        }
+
+        const trackObjects = sendOnlyTransceivers.map(transceiver => ({
+            location: "local" as const,
+            mid: transceiver.mid!,
+            trackName: transceiver.sender.track!.id,
+        }));
+
+        const newTrackResponse = await this.newTrack(
+            this.sessionId,
+            {
+                sessionDescription: offer2,
+                tracks: trackObjects
+            }
+        );
+
+        console.log({ newTrackResponse, time: "144 manager 2" })
+        await pc.setRemoteDescription(newTrackResponse.sessionDescription);
+
+        return newTrackResponse.tracks.map(track => ({
+            sessionId: this.sessionId!,
+            trackId: track.trackName,
+        }));
+
+    }
 
     public async receive(payload: ObjectToBePassed): Promise<MediaStream> {
         let pc = await this.getRTC();

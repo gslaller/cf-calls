@@ -8,7 +8,8 @@ Cloudflare's Calls-API example: Svelte &amp; Golang
 
 > Next steps:
 >
-> - [ ] Refactor so a single RTCPeerConnection suffices
+> - [x] Refactor so a single RTCPeerConnection suffices
+> - [ ] For Sending MediaTrack too.
 > - [ ] A smooth closing of the connection
 > - [ ] A user authentication logic, just a simple http-only cookie
 > - [ ] A client can receive a set of tracks from a different session
