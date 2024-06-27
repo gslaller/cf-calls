@@ -149,12 +149,14 @@ const ManagerSection: React.FC<{
 
 export const Dev: React.FC = () => {
     const [managers, setManagers] = useState<Manager[]>([]);
+
     const [senderFeed, setSenderFeed] = useState<{
         token: ObjectToBePassed,
         stream: MediaStream
         id: string,
         managerId: string,
     }[]>([]);
+
     const [receiverFeed, setReceiverFeed] = useState<{
         token: ObjectToBePassed,
         stream: MediaStream
@@ -175,6 +177,9 @@ export const Dev: React.FC = () => {
     }
 
     function removeManager(id: string) {
+        let manager = managers.find(m => m.id === id);
+        manager?.instance.closeAll();
+
         setManagers(managers.filter(m => m.id !== id));
         setSenderFeed(senderFeed.filter(s => s.managerId !== id));
         setReceiverFeed(receiverFeed.filter(r => r.managerId !== id));

@@ -2,6 +2,9 @@
 
 Cloudflare's Calls-API example: Svelte &amp; Golang
 
+> snaphot
+> ![screenshoot of the webapp](./assets/Screenshot%202024-06-27%20at%2018.47.16.png)
+
 ## Description
 
 **_This is currently in development. The reflection of the mediastream is working._**
