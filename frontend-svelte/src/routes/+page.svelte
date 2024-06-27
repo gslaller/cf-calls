@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { WebRTCManager } from "$lib";
-  import { WebRTCManager as WebRTCManager2 } from "$lib/index2";
+  import { WebRTCManager } from "$lib/WebRTCManager";
+  // import { WebRTCManager as WebRTCManager2 } from "$lib/index2";
   import AudioVis from "$lib/comps/AudioVis.svelte";
 
   let localVideoEle: HTMLVideoElement;
@@ -15,7 +15,8 @@
   let remoteAudio2: MediaStreamTrack | null = null;
 
   // const manager = new WebRTCManager();
-  const manager2 = new WebRTCManager2();
+  // const manager2 = new WebRTCManager2();
+  const manager = new WebRTCManager();
 
   async function starter() {
     try {
@@ -27,10 +28,10 @@
       localAudio = stream.getAudioTracks()[0];
 
       console.log("Now Sending media");
-      let objs = await manager2.send(stream);
+      let objs = await manager.send(stream);
 
       console.log("Now receiving media one");
-      let remoteStream = await manager2.receive(objs);
+      let remoteStream = await manager.receive(objs);
       remoteAudio = remoteStream.getAudioTracks()[0];
       remoteVideoEle.srcObject = remoteStream;
 
@@ -38,7 +39,7 @@
       await new Promise((resolve) => setTimeout(resolve, 10000));
 
       console.log("Now receiving media two");
-      let remoteStream2 = await manager2.receive(objs);
+      let remoteStream2 = await manager.receive(objs);
 
       let audioTrack2 = remoteStream2.getAudioTracks()[0];
       remoteAudio2 = audioTrack2;

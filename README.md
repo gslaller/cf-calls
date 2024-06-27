@@ -9,7 +9,9 @@ Cloudflare's Calls-API example: Svelte &amp; Golang
 > Next steps:
 >
 > - [x] Refactor so a single RTCPeerConnection suffices
-> - [ ] For Sending MediaTrack too.
+> - [x] For Sending MediaTrack too.
+> - [x] Change the frontend to react/ts with tailwindcss
+> - [ ] Create a testing rig under /dev
 > - [ ] A smooth closing of the connection
 > - [ ] A user authentication logic, just a simple http-only cookie
 > - [ ] A client can receive a set of tracks from a different session

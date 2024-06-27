@@ -1,4 +1,7 @@
-type ObjectToBePassed = {
+import { CallsService } from './CallsService';
+import type { CallsServiceI } from './CallsService';
+
+export type ObjectToBePassed = {
     sessionId: string;
     trackId: string;
 }[];
@@ -8,24 +11,17 @@ interface WebRTCManagerI {
     receive(payload: ObjectToBePassed): Promise<MediaStream>;
 }
 
-/**
- * WebRTCManager
- * 
- * This class esbtlishes a single WebRTC connection to the CF- Calls api.
- * The connection can send and receive multiple MediaStreamTracks.
- * 
- * enpoints api:
- * - POST ${basepath}/newSession
- * - POST ${basepath}/newTrack
- * - POST ${basepath}/renegotiate
- * - POST ${basepath}/close
- * - GET/SSE ${basepath}/events
- */
 export class WebRTCManager implements WebRTCManagerI {
     private pc: RTCPeerConnection | null = null;
     private sessionId: string | null = null;
     private readonly iceServers = [{ urls: "stun:stun.cloudflare.com:3478" }];
-    private readonly httpServer = "http://localhost:8088";
+    private callsService: CallsServiceI;
+
+    public id: string = crypto.getRandomValues(new Uint32Array(1))[0].toString(16);
+
+    constructor(callsService?: CallsServiceI) {
+        this.callsService = callsService || new CallsService();
+    }
 
     private async getRTC(): Promise<RTCPeerConnection> {
         if (this.pc !== null) {
@@ -50,62 +46,6 @@ export class WebRTCManager implements WebRTCManagerI {
         });
     }
 
-    private async newSession(offer: RTCSessionDescriptionInit) {
-        const response = await fetch(`${this.httpServer}/newSession`, {
-            method: "POST",
-            body: JSON.stringify({ sessionDescription: offer }),
-        });
-        return await response.json() as {
-            sessionId: string;
-            sessionDescription: RTCSessionDescriptionInit;
-        };
-    }
-
-    private async newTrack(
-        sessionId: string,
-        payload: {
-            sessionDescription: RTCSessionDescriptionInit;
-            tracks: {
-                location: "local";
-                mid: string;
-                trackName: string;
-            }[];
-        } | {
-            sessionDescription?: RTCSessionDescriptionInit;
-            tracks: {
-                location: "remote";
-                sessionId: string;
-                trackName: string;
-            }[];
-        }
-    ) {
-        const url = new URL(`${this.httpServer}/newTrack`);
-        url.searchParams.append("sessionId", sessionId);
-        const response = await fetch(url, {
-            method: "POST",
-            body: JSON.stringify(payload),
-        });
-
-        return await response.json() as {
-            requiresImmediateRenegotiation: boolean;
-            sessionDescription: RTCSessionDescriptionInit;
-            tracks: Array<{
-                mid: string;
-                sessionId: string;
-                trackName: string;
-            }>
-        };
-    }
-
-    private async renegotiate(sessionId: string, payload: RTCSessionDescriptionInit): Promise<void> {
-        const url = new URL(`${this.httpServer}/renegotiate`);
-        url.searchParams.append("sessionId", sessionId);
-        await fetch(url, {
-            method: "POST",
-            body: JSON.stringify({ sessionDescription: payload }),
-        });
-    }
-
     async send(localStream: MediaStream): Promise<ObjectToBePassed> {
         let pc = await this.getRTC();
 
@@ -118,7 +58,7 @@ export class WebRTCManager implements WebRTCManagerI {
         let offer2 = offer;
 
         if (this.sessionId === null) {
-            const { sessionId, sessionDescription } = await this.newSession(offer);
+            const { sessionId, sessionDescription } = await this.callsService.newSession(offer);
             this.sessionId = sessionId;
             await pc.setRemoteDescription(sessionDescription);
             await this.waitForIceConnection(pc);
@@ -133,7 +73,7 @@ export class WebRTCManager implements WebRTCManagerI {
             trackName: transceiver.sender.track!.id,
         }));
 
-        const newTrackResponse = await this.newTrack(
+        const newTrackResponse = await this.callsService.newTrack(
             this.sessionId,
             {
                 sessionDescription: offer2,
@@ -148,7 +88,6 @@ export class WebRTCManager implements WebRTCManagerI {
             sessionId: this.sessionId!,
             trackId: track.trackName,
         }));
-
     }
 
     public async receive(payload: ObjectToBePassed): Promise<MediaStream> {
@@ -163,18 +102,15 @@ export class WebRTCManager implements WebRTCManagerI {
         let firstTime = false;
 
         if (this.sessionId === null) {
-            // we don't need to create a new session if there is already one
-            const newSessionResponse = await this.newSession(offer);
+            const newSessionResponse = await this.callsService.newSession(offer);
             const { sessionId, sessionDescription } = newSessionResponse;
             this.sessionId = sessionId;
 
             await pc.setRemoteDescription(sessionDescription);
             await this.waitForIceConnection(pc);
             firstTime = true;
-
         } else {
             console.log("Found sessionId", this.sessionId);
-
         }
 
         const remoteTracksObjects = payload.map(track => ({
@@ -184,7 +120,6 @@ export class WebRTCManager implements WebRTCManagerI {
         }));
 
         const trackPromise = new Promise<MediaStreamTrack[]>((resolve, reject) => {
-
             const tracks: MediaStreamTrack[] = [];
             let localCounter = 0;
             this.pc!.addEventListener("track", (ev) => {
@@ -200,27 +135,25 @@ export class WebRTCManager implements WebRTCManagerI {
             setTimeout(() => reject(`only received ${tracks.length} of ${remoteTracksObjects.length} tracks`), 5000);
         });
 
-
-
         let answerTracks;
         if (firstTime) {
             console.log("Adding new tracks for the first time");
-            answerTracks = await this.newTrack(this.sessionId, { tracks: remoteTracksObjects });
+            answerTracks = await this.callsService.newTrack(this.sessionId, { tracks: remoteTracksObjects });
             console.log({ answerTracks, time: "First time" });
         } else {
             console.log("Adding new tracks");
-            answerTracks = await this.newTrack(this.sessionId, { sessionDescription: offer, tracks: remoteTracksObjects });
+            answerTracks = await this.callsService.newTrack(this.sessionId, { sessionDescription: offer, tracks: remoteTracksObjects });
             console.log({ answerTracks, time: "Second time" });
-            await pc.setRemoteDescription(answerTracks.sessionDescription);
         }
+
+        console.log("Setting remote description");
+        await pc.setRemoteDescription(answerTracks.sessionDescription);
 
         if (answerTracks.requiresImmediateRenegotiation && answerTracks.sessionDescription.type === "offer") {
-            await pc.setRemoteDescription(answerTracks.sessionDescription);
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
-            await this.renegotiate(this.sessionId, answer);
+            await this.callsService.renegotiate(this.sessionId, answer);
         }
-
 
         const tracks = await trackPromise;
         pc.getReceivers().forEach(receiver => {
@@ -229,4 +162,7 @@ export class WebRTCManager implements WebRTCManagerI {
         return new MediaStream(tracks);
     }
 
+    public async closeAll(): Promise<void> {
+        throw new Error("Method not implemented.");
+    }
 }
