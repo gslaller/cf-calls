@@ -30,16 +30,26 @@ type NewSessionResponse = {
     sessionId: string;
 };
 
+type OneTwoThree = {
+
+}
+
 // /apps/{appId}/sessions/{sessionId}/tracks/new
 type TracksRequest = {
     sessionDescription?: SessionDescription;
     tracks: TrackObject[];
 };
 
+export type TrackObjectResponse = {
+    sessionId: string;
+    trackName: string;
+    mid: string;
+}
+
 type TracksResponse = {
     requiresImmediateRenegotiation: boolean;
     sessionDescription: SessionDescription;
-    tracks: (TrackObject & { error?: ErrorObject })[];
+    tracks: (TrackObjectResponse & { error?: ErrorObject })[];
 };
 
 // /apps/{appId}/sessions/{sessionId}/renegotiate
@@ -63,20 +73,13 @@ type CloseTracksResponse = {
 };
 
 // /apps/{appId}/sessions/{sessionId}
-type GetSessionStateResponse = {
+export type GetSessionStateResponse = {
     tracks: (TrackObject & { status: 'active' | 'inactive' | 'waiting' })[];
 };
 
 
-export interface CallsServiceI {
-    newSession(offer: SessionDescription): Promise<NewSessionResponse>;
-    newTrack(sessionId: string, payload: TracksRequest): Promise<TracksResponse>;
-    renegotiate(sessionId: string, payload: SessionDescription): Promise<RenegotiateResponse>;
-    closeTracks(sessionId: string, payload: CloseTracksRequest): Promise<CloseTracksResponse>;
-    getSessionState(sessionId: string): Promise<GetSessionStateResponse>;
-}
 
-export class CallsService implements CallsServiceI {
+export class CallsService {
 
     constructor(
         private readonly httpServerURL: string = "http://localhost:8088"
@@ -129,9 +132,9 @@ export class CallsService implements CallsServiceI {
     }
 
     async getSessionState(sessionId: string): Promise<GetSessionStateResponse> {
-        const url = new URL(`${this.httpServerURL}/events`);
+        const url = new URL(`${this.httpServerURL}/session`);
         url.searchParams.append("sessionId", sessionId);
-        return this.fetchJSON<GetSessionStateResponse>(url.toString(), 'GET');
+        return this.fetchJSON<GetSessionStateResponse>(url.toString(), 'POST');
     }
 
 }

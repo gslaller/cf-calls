@@ -37,6 +37,8 @@ func main() {
 	router.POST("/newSession", newSession)
 	router.POST("/newTrack", newTrack)
 	router.POST("/renegotiate", renegotiate)
+	router.POST("/session", sessionState)
+	router.POST("/close", closeTrack)
 
 	router.Run(":8088")
 }

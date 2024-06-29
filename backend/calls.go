@@ -85,3 +85,15 @@ func renegotiate(c *gin.Context) {
 
 	forwardRequest(c, "PUT", postPath)
 }
+
+func sessionState(c *gin.Context) {
+	sessionId := c.Query("sessionId")
+	path := fmt.Sprintf("%s/sessions/%s", basePath, sessionId)
+	forwardRequest(c, "GET", path)
+}
+
+func closeTrack(c *gin.Context) {
+	sessionId := c.Query("sessionId")
+	path := fmt.Sprintf("%s/sessions/%s/tracks/close", basePath, sessionId)
+	forwardRequest(c, "PUT", path)
+}

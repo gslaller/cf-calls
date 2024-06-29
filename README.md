@@ -36,9 +36,4 @@ npm run dev
 ```bash
 cd backend
 go run . --appId=<appId> --appSecret=<appSecret>
-
-```
-
-```
-
 ```
