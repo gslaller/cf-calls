@@ -6,13 +6,7 @@ export type ObjectToBePassed = {
     trackId: string;
 }[];
 
-interface WebRTCManagerI {
-    send(localStream: MediaStream): Promise<ObjectToBePassed>;
-    receive(payload: ObjectToBePassed): Promise<MediaStream>;
-    session(): Promise<GetSessionStateResponse>;
-}
-
-export class WebRTCManager implements WebRTCManagerI {
+export class WebRTCManager {
     private pc: RTCPeerConnection | null = null;
     private sessionId: string | null = null;
     private readonly iceServers = [{ urls: "stun:stun.cloudflare.com:3478" }];
@@ -73,7 +67,7 @@ export class WebRTCManager implements WebRTCManagerI {
 
     }
 
-    async send(localStream: MediaStream): Promise<ObjectToBePassed> {
+    async send(localStream: MediaStream) {
         let pc = await this.getRTC();
 
         const sendOnlyTransceivers = localStream.getTracks().map(track => {
@@ -103,19 +97,28 @@ export class WebRTCManager implements WebRTCManagerI {
 
         await pc.setRemoteDescription(newTrackResponse.sessionDescription);
 
-        return newTrackResponse.tracks.map(track => ({
+        const closeFunc = () => this.close(sendOnlyTransceivers);
+
+        let token = newTrackResponse.tracks.map(track => ({
             sessionId: this.sessionId!,
             trackId: track.trackName,
         }));
+
+
+        return {
+            token,
+            close: closeFunc,
+        }
     }
 
     private allAnswers: Awaited<ReturnType<CallsService["newTrack"]>>[] = [];
 
-    public async receive(payload: ObjectToBePassed): Promise<MediaStream> {
+    public async receive(payload: ObjectToBePassed) {
         let pc = await this.getRTC();
 
-        pc.addTransceiver("audio", { direction: "recvonly" });
-        pc.addTransceiver("video", { direction: "recvonly" });
+        let transceviers: RTCRtpTransceiver[] = [];
+        transceviers.push(pc.addTransceiver("audio", { direction: "recvonly" }));
+        transceviers.push(pc.addTransceiver("video", { direction: "recvonly" }));
 
         if (this.sessionId === null) {
             await this.createSession();
@@ -164,52 +167,40 @@ export class WebRTCManager implements WebRTCManagerI {
         }
 
         const tracks = await trackPromise;
-        return new MediaStream(tracks);
+        const closeFunc = () => this.close(transceviers);
+        return {
+            mediaStream: new MediaStream(tracks),
+            close: closeFunc,
+        };
     }
 
-    public async closeAll(): Promise<void> {
-        throw new Error("Method not implemented.");
-    }
-
-    public async closeIncomingP(payload: ObjectToBePassed) {
-        let mids = [];
-
-        for (let answer of this.allAnswers) {
-            let { tracks } = answer;
-
-            for (let track of tracks) {
-                let match = payload.some(p => p.sessionId === this.sessionId && p.trackId === track.trackName);
-
-                if (match) {
-                    mids.push({ mid: track.mid });
-                }
-            }
-        }
-
-        // Call closeIncoming with the collected mids
-        this.closeIncoming(mids);
-    }
-
-
-
-    public async closeIncoming(mids: { mid: string }[]) {
+    private async close(
+        transceivers: RTCRtpTransceiver[],
+    ) {
+        let mids = transceivers.map(t => ({ mid: t.mid! }));
         let pc = await this.getRTC();
         let offer = await pc.createOffer();
         pc.setLocalDescription(offer);
         let response = await this.callsService.closeTracks(this.sessionId!, { sessionDescription: offer, tracks: mids, force: true });
         if (response.requiresImmediateRenegotiation) {
+            await pc.setRemoteDescription(response.sessionDescription);
             let answer = await pc.createAnswer();
-            pc.setLocalDescription(answer);
+            await pc.setLocalDescription(answer);
             await this.callsService.renegotiate(this.sessionId!, answer);
         }
 
-        response.tracks.forEach(track => {
-            console.log("Stopping track", track);
-            let transceiver = pc.getTransceivers().find(t => t.mid === track.mid);
-            console.log("Transceiver", transceiver)
-            if (transceiver) {
-                transceiver.stop();
-            }
-        });
+
+        for (let transceiver of transceivers) {
+            transceiver.stop();
+        }
+    }
+
+    public async closeSession() {
+        if (this.sessionId === null) {
+            return;
+        }
+        let transceivers = this.pc?.getTransceivers() || [];
+        this.close(transceivers);
+        this.pc?.close();
     }
 }

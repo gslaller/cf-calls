@@ -73,10 +73,12 @@ const ManagerSection: React.FC<{
     manager: Manager,
     onRemoveManager: (id: string) => void
 }> = ({ manager, onRemoveManager }) => {
+
     const [senderFeed, setSenderFeed] = useState<{
         token: ObjectToBePassed,
         stream: MediaStream
         id: string,
+        close: () => void,
         managerId: string,
     }[]>([]);
 
@@ -84,26 +86,25 @@ const ManagerSection: React.FC<{
         token: ObjectToBePassed,
         stream: MediaStream
         id: string,
+        close: () => void,
         managerId: string,
     }[]>([]);
 
     const [tokenInput, setTokenInput] = useState('');
 
     async function addSender() {
-        let [stream, token] = await manager.instance.sendFake({ audio: true, video: true });
+        let { close, stream, token } = await manager.instance.sendFake({ audio: true, video: true });
         let id = await JSONSHA256(token);
-        setSenderFeed([...senderFeed, { token, stream, id, managerId: manager.id }]);
+        setSenderFeed([...senderFeed, { token, stream, id, close, managerId: manager.id }]);
     }
 
-    const tokenIdRef = useRef<Map<string, ObjectToBePassed>>(new Map());
 
     async function addReceiver() {
         try {
             const token = JSON.parse(tokenInput) as ObjectToBePassed;
-            const stream = await manager.instance.receive(token);
+            const { close, mediaStream } = await manager.instance.receive(token);
             const id = await JSONSHA256(token);
-            tokenIdRef.current.set(id, token);
-            setReceiverFeed([...receiverFeed, { token, stream, id, managerId: manager.id }]);
+            setReceiverFeed([...receiverFeed, { token, stream: mediaStream, id, close, managerId: manager.id }]);
             setTokenInput('');
         } catch (error) {
             console.error('Error adding receiver:', error);
@@ -111,15 +112,13 @@ const ManagerSection: React.FC<{
         }
     }
 
-    function removeSender(id: string) {
+    function removeSender(id: string, close: () => void) {
+        close();
         setSenderFeed(senderFeed.filter(s => s.id !== id));
     }
 
-    function removeReceiver(id: string) {
-        let token = tokenIdRef.current.get(id);
-        if (token) {
-            manager.instance.closeIncomingP(token);
-        }
+    function removeReceiver(id: string, close: () => void) {
+        close();
         setReceiverFeed(receiverFeed.filter(r => r.id !== id));
     }
 
@@ -160,12 +159,12 @@ const ManagerSection: React.FC<{
                         New Sender
                     </button>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {senderFeed.map(({ token, stream, id }) => (
+                        {senderFeed.map(({ token, stream, id, close }) => (
                             <VideoFeed
                                 key={id}
                                 stream={stream}
                                 token={token}
-                                onRemove={() => removeSender(id)}
+                                onRemove={() => removeSender(id, close)}
                             />
                         ))}
                     </div>
@@ -191,11 +190,11 @@ const ManagerSection: React.FC<{
                         </button>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {receiverFeed.map(({ stream, id }) => (
+                        {receiverFeed.map(({ stream, id, close }) => (
                             <VideoFeed
                                 key={id}
                                 stream={stream}
-                                onRemove={() => removeReceiver(id)}
+                                onRemove={() => removeReceiver(id, close)}
                             />
                         ))}
                     </div>
@@ -218,8 +217,6 @@ export const Dev: React.FC = () => {
     }
 
     function removeManager(id: string) {
-        let manager = managers.find(m => m.id === id);
-        manager?.instance.closeAll();
         setManagers(managers.filter(m => m.id !== id));
     }
 

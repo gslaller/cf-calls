@@ -1,4 +1,4 @@
-import { ObjectToBePassed, WebRTCManager } from "./WebRTCManager";
+import { WebRTCManager } from "./WebRTCManager";
 
 export type fakeAudioVideoP = {
     audio?: {
@@ -11,10 +11,17 @@ export type fakeAudioVideoP = {
 };
 
 export class WebRTCManagerTester extends WebRTCManager {
-    public async sendFake(obj: fakeAudioVideoP): Promise<[MediaStream, ObjectToBePassed]> {
+    public async sendFake(obj: fakeAudioVideoP) {
         const [stream, _] = await this.fakeAudioVideo(obj);
-        const token = await this.send(stream);
-        return [stream, token];
+        const { token, close } = await this.send(stream);
+        return {
+            stream,
+            token,
+            close: () => {
+                close();
+                stream.getTracks().forEach(track => track.stop());
+            }
+        }
     }
 
     private fakeAudioVideo(obj: fakeAudioVideoP): Promise<[MediaStream, () => void]> {
